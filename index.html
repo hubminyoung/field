@@ -34,6 +34,13 @@
   .queue { font-size:12px; color:var(--sub); white-space:nowrap; }
   .queue.busy { color:var(--warn); }
   .zhint { margin:-2px 2px 0; font-size:11px; color:var(--sub); line-height:1.4; }
+  .guide { font-size:12px; color:var(--sub); margin:-2px 2px 0; }
+  .guide summary { cursor:pointer; color:var(--accent); font-weight:600; padding:2px 0; list-style:none; }
+  .guide summary::-webkit-details-marker { display:none; }
+  .guide[open] summary { margin-bottom:4px; }
+  .guide dl { margin:0; display:grid; gap:6px; max-height:40vh; overflow:auto; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .guide dt { font-weight:700; color:var(--ink); }
+  .guide dd { margin:0; line-height:1.5; }
   a.doc { font-size:13px; color:var(--accent); white-space:nowrap; }
 
   main { padding:12px 16px 24px; display:grid; gap:14px; max-width:720px; margin:0 auto; }
@@ -130,7 +137,20 @@
     <label class="field"><span>구역</span><input id="zone" placeholder="예: 1번출구, 그늘, 딱딱, 건조"></label>
     <span class="queue" id="queue">대기 0</span>
   </div>
-  <p class="zhint">빛: 양지 · 반그늘(하늘 조각) · 그늘(하늘 막힘)<br>토양: 딱딱(약간 긁힘) · 보통(5~8cm) · 부드러움(8cm↑)<br>수분: 건조(마름) · 보통(촉촉, 안뭉침) · 습윤(뭉치고 물기) · 과습(질척/이끼)</p>
+  <p class="zhint">빛: 양지 · 반그늘(하늘 조각) · 그늘(하늘 거의 안 보임)<br>토양: 딱딱(약간 긁힘) · 보통(5~8cm) · 부드러움(8cm↑)<br>수분: 건조(마름) · 보통(촉촉, 안뭉침) · 습윤(뭉치고 물기) · 과습(질척/이끼)</p>
+  <details class="guide">
+    <summary>판단 기준 ▾</summary>
+    <dl>
+      <dt>잡초</dt>
+      <dd>젖음: 고마리, 여뀌류, 골풀, 미나리<br>마름: 쇠비름, 바랭이, 강아지풀<br>답압: 질경이, 새포아풀</dd>
+      <dt>식물 상태</dt>
+      <dd>마름: 아침 잎처짐, 작은잎/이른 낙엽<br>젖음: 아랫잎 노래짐, 젖은흙 잎처짐(뿌리과습), 줄기밑동 무름/냄새, 버섯(과습/통기)</dd>
+      <dt>통기부족</dt>
+      <dd>물고임, 썩은/시큼 냄새, 흙이 회색/청회색</dd>
+      <dt>지형/물길</dt>
+      <dd>높낮이, 배수구/빗물받이, 포장경사, 낙엽/흙 쌓인 자국</dd>
+    </dl>
+  </details>
 </header>
 
 <main id="feed">
