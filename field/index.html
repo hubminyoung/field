@@ -33,6 +33,7 @@
   .field input { flex:1; min-width:0; border:0; background:none; padding:10px 0; font-size:16px; outline:none; }
   .queue { font-size:12px; color:var(--sub); white-space:nowrap; }
   .queue.busy { color:var(--warn); }
+  .zhint { margin:-2px 2px 0; font-size:11px; color:var(--sub); line-height:1.4; }
   a.doc { font-size:13px; color:var(--accent); white-space:nowrap; }
 
   main { padding:12px 16px 24px; display:grid; gap:14px; max-width:720px; margin:0 auto; }
@@ -79,6 +80,25 @@
   .gate h1 { font-size:22px; margin:0; }
   .gate p { margin:0; color:var(--sub); font-size:14px; line-height:1.5; }
   .gate input { width:100%; padding:13px; border:1px solid var(--line); border-radius:10px; font-size:18px; background:var(--surface); }
+
+  /* 탭 */
+  .tabs { display:flex; gap:0; border-bottom:1px solid var(--line); background:var(--bg); position:sticky; top:0; z-index:6; }
+  .tabs button { flex:1; border:0; background:none; padding:12px 0; font-size:15px; font-weight:600; color:var(--sub); border-bottom:3px solid transparent; }
+  .tabs button.on { color:var(--ink); border-bottom-color:var(--accent); }
+  header { top:46px; }
+  /* 찾기 */
+  .find { padding:12px 16px 40px; max-width:720px; margin:0 auto; display:grid; gap:12px; }
+  .find .bar { display:flex; gap:8px; position:sticky; top:46px; background:var(--bg); padding:6px 0; z-index:4; }
+  .find .bar input, .find .bar select { min-width:0; border:1px solid var(--line); border-radius:10px; padding:10px; font-size:16px; background:var(--surface); color:var(--ink); }
+  .find .bar input { flex:1; }
+  .find .bar select { flex:none; max-width:42%; }
+  .fmeta { font-size:13px; color:var(--sub); }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:10px; display:grid; gap:6px; }
+  .card .top { font-size:12px; color:var(--sub); display:flex; gap:6px; flex-wrap:wrap; }
+  .card .top b { color:var(--ink); font-weight:600; }
+  .card .strip a { flex:none; }
+  .card .strip .ph { width:110px; height:110px; border-radius:6px; background:var(--line); object-fit:cover; display:block; }
+  mark { background:#f3d36b; color:#1b1f1a; border-radius:2px; }
   [hidden] { display:none !important; }
   button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 </style>
@@ -95,15 +115,22 @@
   </div>
 </div>
 
+<nav class="tabs">
+  <button id="tabRec" class="on">기록하기</button>
+  <button id="tabFind">찾기</button>
+</nav>
+
+<div id="recView">
 <header>
   <div class="row">
     <label class="field"><span>답사</span><input id="visit" placeholder="예: 261013_보라매"></label>
     <a class="doc" id="docLink" target="_blank" rel="noopener" hidden>문서 열기</a>
   </div>
   <div class="row">
-    <label class="field"><span>구역</span><input id="zone" placeholder="예: 1번출구~마을버스, 반그늘"></label>
+    <label class="field"><span>구역</span><input id="zone" placeholder="예: 1번출구, 그늘, 건조"></label>
     <span class="queue" id="queue">대기 0</span>
   </div>
+  <p class="zhint">빛: 양지 · 반그늘 · 그늘(하늘 막힘) / 수분: 건조 · 보통 · 습윤 · 과습</p>
 </header>
 
 <main id="feed">
@@ -126,6 +153,16 @@
     <button class="next" id="nextBtn">다음 ▶</button>
   </div>
   <p class="hint">업로드는 뒤에서 진행됩니다. 대기 숫자가 0이 될 때까지 이 화면을 닫지 마세요.</p>
+</section>
+</div>
+
+<section class="find" id="findView" hidden>
+  <div class="bar">
+    <input id="q" type="search" placeholder="검색: 버베나, 반그늘, 딱딱…">
+    <select id="fVisit"><option value="">모든 답사</option></select>
+  </div>
+  <div class="fmeta" id="fMeta">불러오는 중…</div>
+  <div id="results" style="display:grid;gap:12px"></div>
 </section>
 
 <script>
@@ -274,11 +311,14 @@ async function run() {
       const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
       for (let i = it.ids.length; i < it.shots.length; i++) {
         st.textContent = `사진 ${i + 1}/${it.shots.length} 올리는 중`; st.className = 'st';
-        const r = await api({ action: 'upload', visit: it.visit, name: `${stamp}_${i + 1}.jpg`, data: await toDataUrl(it.shots[i].blob) });
+        const blob = it.shots[i].blob;
+        const r = await api({ action: 'upload', visit: it.visit, name: `${stamp}_${i + 1}.jpg`, data: await toDataUrl(blob), thumb: await makeThumb(blob) });
         it.ids.push(r.id);
+        it.thumbs = it.thumbs || []; it.thumbs.push(r.thumbId || '');
       }
       st.textContent = '문서에 정리하는 중';
-      const r = await api({ action: 'save', visit: it.visit, zone: it.zone, note: it.note, photos: it.ids });
+      const r = await api({ action: 'save', visit: it.visit, zone: it.zone, note: it.note, photos: it.ids, thumbs: it.thumbs || [] });
+      allRows = null;
       st.textContent = '저장됨'; st.className = 'st ok';
       if (r.docUrl) { $('docLink').href = r.docUrl; $('docLink').hidden = false; }
       queue.shift(); updateQueue();
@@ -290,6 +330,112 @@ async function run() {
   }
   busy = false;
 }
+
+// ===== 미리보기 사진 (찾기 화면용, 360px) =====
+function makeThumb(blob) {
+  return new Promise(res => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const w = 360, h = Math.round(img.naturalHeight * w / img.naturalWidth);
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      res(c.toDataURL('image/jpeg', 0.72));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); res(''); };
+    img.src = url;
+  });
+}
+
+// ===== 탭 =====
+function showTab(find) {
+  $('tabRec').classList.toggle('on', !find); $('tabFind').classList.toggle('on', find);
+  $('recView').hidden = find; $('findView').hidden = !find;
+  if (find) loadRows();
+  window.scrollTo(0, 0);
+}
+$('tabRec').onclick = () => showTab(false);
+$('tabFind').onclick = () => showTab(true);
+
+// ===== 찾기 =====
+let allRows = null;
+const thumbCache = {};
+async function loadRows() {
+  if (allRows) { renderFind(); return; }
+  $('fMeta').textContent = '불러오는 중…';
+  try {
+    const r = await api({ action: 'list' });
+    allRows = r.rows.slice().reverse();
+    const visits = [...new Set(allRows.map(x => x.visit))];
+    const cur = $('fVisit').value;
+    $('fVisit').innerHTML = '<option value="">모든 답사</option>' + visits.map(v => `<option>${esc(v)}</option>`).join('');
+    if (visits.includes(cur)) $('fVisit').value = cur;
+    renderFind();
+  } catch (e) { $('fMeta').textContent = '불러오지 못했습니다: ' + e.message; }
+}
+$('q').addEventListener('input', () => { clearTimeout(window._qt); window._qt = setTimeout(renderFind, 200); });
+$('fVisit').onchange = renderFind;
+
+function hi(text, words) {
+  let h = esc(text);
+  words.forEach(w => { if (w) h = h.replace(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), m => `<mark>${m}</mark>`); });
+  return h;
+}
+function renderFind() {
+  if (!allRows) return;
+  const words = $('q').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const v = $('fVisit').value;
+  const rows = allRows.filter(r => (!v || r.visit === v) &&
+    words.every(w => (r.visit + ' ' + r.zone + ' ' + r.note).toLowerCase().includes(w)));
+  $('fMeta').textContent = `${rows.length}건` + (words.length || v ? ` / 전체 ${allRows.length}건` : '');
+  $('results').innerHTML = rows.slice(0, 80).map((r, i) => {
+    const ph = r.photos.map((id, k) => {
+      const tid = r.thumbs[k] || id;
+      return `<a href="https://drive.google.com/file/d/${id}/view" target="_blank" rel="noopener"><img class="ph" data-tid="${tid}" alt=""></a>`;
+    }).join('');
+    return `<div class="card">
+      <div class="top"><b>${esc(r.visit)}</b>${r.zone ? `<span>· ${hi(r.zone, words)}</span>` : ''}<span>· ${esc(r.t.slice(5))}</span></div>
+      ${ph ? `<div class="strip">${ph}</div>` : ''}
+      ${r.note ? `<div class="note">${hi(r.note, words)}</div>` : ''}
+    </div>`;
+  }).join('') || '<p class="empty">찾는 기록이 없습니다.</p>';
+  watchThumbs();
+}
+
+// 화면에 보이는 사진만 가져오기
+const pending = new Set();
+let thumbTimer = null;
+const io = 'IntersectionObserver' in window ? new IntersectionObserver(es => {
+  es.forEach(e => { if (e.isIntersecting) { io.unobserve(e.target); queueThumb(e.target); } });
+}, { rootMargin: '300px' }) : null;
+function watchThumbs() {
+  document.querySelectorAll('img.ph[data-tid]').forEach(img => {
+    const id = img.dataset.tid;
+    if (thumbCache[id]) { img.src = thumbCache[id]; return; }
+    io ? io.observe(img) : queueThumb(img);
+  });
+}
+function queueThumb(img) {
+  pending.add(img.dataset.tid);
+  clearTimeout(thumbTimer);
+  thumbTimer = setTimeout(fetchThumbs, 60);
+}
+async function fetchThumbs() {
+  const ids = [...pending].filter(id => !thumbCache[id]).slice(0, 12);
+  ids.forEach(id => pending.delete(id));
+  if (!ids.length) return;
+  try {
+    const r = await api({ action: 'thumbs', ids });
+    Object.entries(r.thumbs).forEach(([id, src]) => {
+      if (!src) return;
+      thumbCache[id] = src;
+      document.querySelectorAll(`img.ph[data-tid="${id}"]`).forEach(i => i.src = src);
+    });
+  } catch (e) {}
+  if (pending.size) fetchThumbs();
+}
+
 window.addEventListener('beforeunload', e => { if (queue.length) { e.preventDefault(); e.returnValue = ''; } });
 </script>
 </body>
