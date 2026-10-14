@@ -121,6 +121,9 @@
   .pzone { min-height:44px; border:1.5px dashed var(--line); border-radius:10px; padding:10px; font-size:14px; color:var(--sub);
     outline:none; -webkit-user-select:text; user-select:text; caret-color:transparent; }
   .pzone:empty::before { content:attr(data-ph); }
+  body.dropping::after { content:"여기에 놓으면 사진이 들어갑니다"; position:fixed; inset:12px; z-index:30; border:3px dashed var(--accent);
+    border-radius:16px; background:color-mix(in srgb, var(--bg) 85%, transparent); display:grid; place-items:center;
+    font-size:18px; font-weight:700; color:var(--accent); pointer-events:none; }
   [hidden] { display:none !important; }
   button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 </style>
@@ -182,7 +185,7 @@
     <div class="flash" id="flash"></div>
   </div>
   <div class="shots" id="shots"></div>
-  <div class="pzone" id="pzone" contenteditable="true" inputmode="none" data-ph="여기를 길게 눌러 사진 붙여넣기"></div>
+  <div class="pzone" id="pzone" contenteditable="true" inputmode="none" data-ph="사진 붙여넣기: 폰은 여기를 길게 누르기 · PC는 Ctrl+V 또는 끌어다 놓기"></div>
   <textarea id="note" placeholder="설명 (키보드 마이크로 말해도 됩니다)"></textarea>
   <div class="actions">
     <label class="album">앨범<input id="albumIn" type="file" accept="image/*" multiple></label>
@@ -207,7 +210,7 @@
     <div class="shead"><b id="eTitle">기록 수정</b><button id="eClose" class="ghost">닫기</button></div>
     <label class="field"><span>구역</span><input id="eZone"></label>
     <div class="egrid" id="ePhotos"></div>
-    <div class="pzone" id="epzone" contenteditable="true" inputmode="none" data-ph="여기를 길게 눌러 사진 붙여넣기"></div>
+    <div class="pzone" id="epzone" contenteditable="true" inputmode="none" data-ph="사진 붙여넣기: 폰은 여기를 길게 누르기 · PC는 Ctrl+V 또는 끌어다 놓기"></div>
     <div class="actions">
       <label class="album">사진 추가<input id="eAlbum" type="file" accept="image/*" multiple></label>
     </div>
@@ -322,6 +325,18 @@ document.addEventListener('paste', e => {
   const inZone = e.target.closest && e.target.closest('.pzone');
   if (imgs.length) { e.preventDefault(); addPasted(imgs); }
   else if (inZone && !(e.clipboardData && [...e.clipboardData.types].some(t => t.includes('html')))) e.preventDefault(); // 글자는 넣지 않음
+});
+// PC: 폴더에서 사진을 끌어다 놓기
+let dragDepth = 0;
+document.addEventListener('dragenter', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { dragDepth++; document.body.classList.add('dropping'); } });
+document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dropping'); } });
+document.addEventListener('dragover', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault(); });
+document.addEventListener('drop', e => {
+  const files = [...(e.dataTransfer?.files || [])].filter(f => f.type.startsWith('image/'));
+  dragDepth = 0; document.body.classList.remove('dropping');
+  if (!files.length) return;
+  e.preventDefault();
+  addPasted(files);
 });
 // 일부 아이폰은 사진을 파일 대신 <img>로 넣어 줌 → 꺼내서 사진으로 추가
 ['pzone', 'epzone'].forEach(id => {
