@@ -130,6 +130,7 @@
   .plist button { text-align:left; border:1px solid var(--line); background:var(--bg); border-radius:8px; padding:10px 12px; font-size:15px; }
   .egrid .pick img { outline:3px solid var(--accent); outline-offset:-3px; }
   .egrid .pick::after { content:"✓"; position:absolute; top:4px; right:4px; width:24px; height:24px; border-radius:50%; background:var(--accent); color:var(--accent-ink); text-align:center; line-height:24px; font-size:14px; }
+  .netbar { position:sticky; top:0; z-index:7; background:var(--warn); color:#fff; font-size:14px; line-height:1.5; padding:10px 16px; }
   [hidden] { display:none !important; }
   button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 </style>
@@ -146,6 +147,7 @@
   </div>
 </div>
 
+<div class="netbar" id="netBar" hidden>연결이 끊긴 것 같아요. <b>새로고침</b>해 주세요. 올리던 기록은 이 기기에 보관돼 있어서 새로고침 후 이어서 올라가요.</div>
 <nav class="tabs">
   <button id="tabRec" class="on">기록하기</button>
   <button id="tabFind">찾기</button>
@@ -251,10 +253,37 @@ const store = {
 };
 const $ = id => document.getElementById(id);
 
+// ===== 올리기 전 기록 보관(이 기기 안) — 새로고침·창 닫기에도 안 사라지고 다시 열면 이어서 올림 =====
+const qdb = (() => {
+  let p;
+  const open = () => p || (p = new Promise((res, rej) => {
+    const r = indexedDB.open('fn_queue', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('items', { keyPath: 'key' });
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }));
+  const tx = async (mode, fn) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const t = db.transaction('items', mode); const q = fn(t.objectStore('items'));
+      t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error);
+    });
+  };
+  return {
+    put: it => tx('readwrite', s => s.put(it)).catch(() => {}),
+    del: k => tx('readwrite', s => s.delete(k)).catch(() => {}),
+    all: () => tx('readonly', s => s.getAll()).catch(() => []),
+  };
+})();
+function persist(it) {
+  return qdb.put({ key: it.key, visit: it.visit, zone: it.zone, note: it.note, ids: it.ids || [], thumbs: it.thumbs || [],
+    shots: it.shots.map(x => x.driveId ? { driveId: x.driveId } : { blob: x.blob }) });
+}
+
 let password = store.get('fn_pw', '');
 let shots = [];        // 현재 세트 사진 {blob, url}
 let queue = [];        // 업로드 대기 세트
 let busy = false;
+let fails = 0;         // 연속 실패 횟수 (3번이면 위에 알림)
 let stream = null, track = null;
 let lastZone = null;
 
@@ -291,6 +320,16 @@ $('pwBtn').onclick = async () => {
   catch (e) { $('pwMsg').textContent = e.message; }
 };
 if (!password) showGate();
+
+// 지난번에 다 못 올린 기록이 이 기기에 있으면 다시 대기열에 넣고 이어서 올림
+(async () => {
+  const saved = (await qdb.all()).sort((a, b) => a.key < b.key ? -1 : 1);
+  saved.forEach(s => {
+    const sh = s.shots.map(x => x.driveId ? { driveId: x.driveId } : { blob: x.blob, url: URL.createObjectURL(x.blob) });
+    queue.push(Object.assign({}, s, { shots: sh, el: renderItem(s.zone, s.note, sh) }));
+  });
+  if (saved.length) { updateQueue(); if (password) run(); }
+})();
 
 // ===== 카메라 =====
 $('camOn').onclick = startCam;
@@ -392,8 +431,8 @@ $('nextBtn').onclick = () => {
   const visit = $('visit').value.trim() || today + '_답사';
   const zone = $('zone').value.trim();
   addZone(visit, zone);
-  const item = { visit, zone, note, shots, el: renderItem(zone, note, shots) };
-  queue.push(item);
+  const item = { key: String(Date.now()) + Math.random().toString(36).slice(2, 6), visit, zone, note, shots, el: renderItem(zone, note, shots) };
+  queue.push(item); persist(item);
   shots = []; drawShots();
   $('note').value = ''; store.set('fn_draft', '');
   updateQueue(); run();
@@ -481,15 +520,18 @@ async function run() {
           : await api({ action: 'upload', visit: it.visit, name: `${stamp}_${i + 1}.jpg`, data: await toDataUrl(sh.blob), thumb: await makeThumb(sh.blob) });
         it.ids.push(r.id);
         it.thumbs = it.thumbs || []; it.thumbs.push(r.thumbId || '');
+        persist(it); fails = 0; $('netBar').hidden = true;
       }
       st.textContent = '문서에 정리하는 중';
       const r = await api({ action: 'save', visit: it.visit, zone: it.zone, note: it.note, photos: it.ids, thumbs: it.thumbs || [] });
       allRows = null;
       st.textContent = '저장됨'; st.className = 'st ok';
       if (r.docUrl) { $('docLink').href = r.docUrl; $('docLink').hidden = false; }
-      queue.shift(); updateQueue();
+      queue.shift(); qdb.del(it.key); updateQueue();
+      fails = 0; $('netBar').hidden = true;
     } catch (e) {
       st.textContent = '전송 실패, 10초 뒤 다시 시도: ' + e.message; st.className = 'st err';
+      if (++fails >= 3) $('netBar').hidden = false;
       if (/비밀번호/.test(e.message)) { busy = false; showGate(); return; }
       await new Promise(r => setTimeout(r, 10000));
     }
