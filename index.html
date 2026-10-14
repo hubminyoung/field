@@ -118,6 +118,9 @@
   .egrid b { position:absolute; top:4px; right:4px; width:26px; height:26px; border-radius:50%; background:rgba(0,0,0,.7); color:#fff;
     text-align:center; line-height:26px; font-weight:400; cursor:pointer; }
   .egrid .new::after { content:"새 사진"; position:absolute; left:4px; bottom:4px; font-size:10px; background:var(--accent); color:var(--accent-ink); border-radius:6px; padding:1px 5px; }
+  .pzone { min-height:44px; border:1.5px dashed var(--line); border-radius:10px; padding:10px; font-size:14px; color:var(--sub);
+    outline:none; -webkit-user-select:text; user-select:text; caret-color:transparent; }
+  .pzone:empty::before { content:attr(data-ph); }
   [hidden] { display:none !important; }
   button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 </style>
@@ -166,7 +169,7 @@
 </header>
 
 <main id="feed">
-  <p class="empty" id="empty">사진을 여러 장 찍고 설명을 적은 뒤 <b>다음</b>을 누르세요. 세트가 여기 쌓이고, 구글 문서에 같은 순서로 정리됩니다.</p>
+  <p class="empty" id="empty" hidden></p>
 </main>
 
 <section class="composer" id="composer">
@@ -179,11 +182,13 @@
     <div class="flash" id="flash"></div>
   </div>
   <div class="shots" id="shots"></div>
+  <div class="pzone" id="pzone" contenteditable="true" inputmode="none" data-ph="여기를 길게 눌러 사진 붙여넣기"></div>
   <textarea id="note" placeholder="설명 (키보드 마이크로 말해도 됩니다)"></textarea>
   <div class="actions">
     <label class="album">앨범<input id="albumIn" type="file" accept="image/*" multiple></label>
     <button class="next" id="nextBtn">다음 ▶</button>
   </div>
+  <p class="st" id="pasteMsg"></p>
   <p class="hint">업로드는 뒤에서 진행됩니다. 대기 숫자가 0이 될 때까지 이 화면을 닫지 마세요.</p>
 </section>
 </div>
@@ -202,9 +207,9 @@
     <div class="shead"><b id="eTitle">기록 수정</b><button id="eClose" class="ghost">닫기</button></div>
     <label class="field"><span>구역</span><input id="eZone"></label>
     <div class="egrid" id="ePhotos"></div>
+    <div class="pzone" id="epzone" contenteditable="true" inputmode="none" data-ph="여기를 길게 눌러 사진 붙여넣기"></div>
     <div class="actions">
       <label class="album">사진 추가<input id="eAlbum" type="file" accept="image/*" multiple></label>
-      <span class="hint" style="align-self:center">복사한 사진은 설명 칸을 길게 눌러 붙여넣기</span>
     </div>
     <textarea id="eNote"></textarea>
     <button class="next" id="eSave">저장</button>
@@ -308,12 +313,26 @@ function pastedImages(e) {
   return [...((e.clipboardData && e.clipboardData.items) || [])]
     .filter(it => it.kind === 'file' && it.type.startsWith('image/')).map(it => it.getAsFile()).filter(Boolean);
 }
+function addPasted(files) {
+  if (editing) { files.forEach(f => editing.add.push({ blob: f, url: URL.createObjectURL(f) })); drawEdit(); }
+  else if (!$('recView').hidden) files.forEach(addShot);
+}
 document.addEventListener('paste', e => {
   const imgs = pastedImages(e);
-  if (!imgs.length) return;
-  e.preventDefault();
-  if (editing) { imgs.forEach(f => editing.add.push({ blob: f, url: URL.createObjectURL(f) })); drawEdit(); }
-  else if (!$('recView').hidden) imgs.forEach(addShot);
+  const inZone = e.target.closest && e.target.closest('.pzone');
+  if (imgs.length) { e.preventDefault(); addPasted(imgs); }
+  else if (inZone && !(e.clipboardData && [...e.clipboardData.types].some(t => t.includes('html')))) e.preventDefault(); // 글자는 넣지 않음
+});
+// 일부 아이폰은 사진을 파일 대신 <img>로 넣어 줌 → 꺼내서 사진으로 추가
+['pzone', 'epzone'].forEach(id => {
+  const z = $(id);
+  z.addEventListener('input', async () => {
+    const imgs = [...z.querySelectorAll('img')];
+    z.innerHTML = '';
+    const files = [];
+    for (const im of imgs) { try { files.push(await (await fetch(im.src)).blob()); } catch (e) {} }
+    if (files.length) addPasted(files);
+  });
 });
 
 function addShot(blob) { shots.push({ blob, url: URL.createObjectURL(blob) }); drawShots(); }
@@ -541,6 +560,7 @@ $('eSave').onclick = async () => {
   } catch (e) { $('eMsg').textContent = '저장하지 못했습니다: ' + e.message; $('eMsg').className = 'st err'; }
   finally { $('eSave').disabled = false; }
 };
+
 
 window.addEventListener('beforeunload', e => { if (queue.length) { e.preventDefault(); e.returnValue = ''; } });
 </script>
