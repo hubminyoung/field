@@ -124,6 +124,10 @@
   body.dropping::after { content:"여기에 놓으면 사진이 들어갑니다"; position:fixed; inset:12px; z-index:30; border:3px dashed var(--accent);
     border-radius:16px; background:color-mix(in srgb, var(--bg) 85%, transparent); display:grid; place-items:center;
     font-size:18px; font-weight:700; color:var(--accent); pointer-events:none; }
+  .plist { display:grid; gap:4px; }
+  .plist button { text-align:left; border:1px solid var(--line); background:var(--bg); border-radius:8px; padding:10px 12px; font-size:15px; }
+  .egrid .pick img { outline:3px solid var(--accent); outline-offset:-3px; }
+  .egrid .pick::after { content:"✓"; position:absolute; top:4px; right:4px; width:24px; height:24px; border-radius:50%; background:var(--accent); color:var(--accent-ink); text-align:center; line-height:24px; font-size:14px; }
   [hidden] { display:none !important; }
   button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 </style>
@@ -189,6 +193,7 @@
   <textarea id="note" placeholder="설명 (키보드 마이크로 말해도 됩니다)"></textarea>
   <div class="actions">
     <label class="album">앨범<input id="albumIn" type="file" accept="image/*" multiple></label>
+    <button class="album" id="driveBtn" type="button">드라이브</button>
     <button class="next" id="nextBtn">다음 ▶</button>
   </div>
   <p class="st" id="pasteMsg"></p>
@@ -213,10 +218,21 @@
     <div class="pzone" id="epzone" contenteditable="true" inputmode="none" data-ph="사진 붙여넣기: 폰은 여기를 길게 누르기 · PC는 Ctrl+V 또는 끌어다 놓기"></div>
     <div class="actions">
       <label class="album">사진 추가<input id="eAlbum" type="file" accept="image/*" multiple></label>
+      <button class="album" id="eDriveBtn" type="button">드라이브</button>
     </div>
     <textarea id="eNote"></textarea>
     <button class="next" id="eSave">저장</button>
     <p class="st" id="eMsg"></p>
+  </div>
+</div>
+
+<div class="sheet" id="pickSheet" hidden>
+  <div class="sbox">
+    <div class="shead"><button id="pBack" class="ghost">◀ 위로</button><b id="pTitle">드라이브</b><button id="pClose" class="ghost">닫기</button></div>
+    <div id="pFolders" class="plist"></div>
+    <div id="pImages" class="egrid"></div>
+    <p class="st" id="pMsg"></p>
+    <button class="next" id="pAdd" disabled>사진 추가</button>
   </div>
 </div>
 
@@ -351,8 +367,10 @@ document.addEventListener('drop', e => {
 });
 
 function addShot(blob) { shots.push({ blob, url: URL.createObjectURL(blob) }); drawShots(); }
+function imgAttr(p) { return p.url ? `src="${p.url}"` : `class="ph" data-tid="${p.driveId}"`; }
 function drawShots() {
-  $('shots').innerHTML = shots.map((s, i) => `<div><img src="${s.url}" alt=""><b data-i="${i}">×</b></div>`).join('');
+  $('shots').innerHTML = shots.map((s, i) => `<div><img ${imgAttr(s)} alt=""><b data-i="${i}">×</b></div>`).join('');
+  watchThumbs();
   $('shots').querySelectorAll('b').forEach(x => x.onclick = () => { shots.splice(+x.dataset.i, 1); drawShots(); });
   $('count').textContent = shots.length;
 }
@@ -379,9 +397,10 @@ function renderItem(zone, note, list) {
     $('feed').appendChild(h); lastZone = zone;
   }
   const el = document.createElement('div'); el.className = 'item';
-  el.innerHTML = (list.length ? `<div class="strip">${list.map(s => `<img src="${s.url}" alt="">`).join('')}</div>` : '')
+  el.innerHTML = (list.length ? `<div class="strip">${list.map(s => `<img ${imgAttr(s)} alt="">`).join('')}</div>` : '')
     + (note ? `<div class="note">${esc(note)}</div>` : '') + `<div class="st">대기 중</div>`;
   $('feed').appendChild(el);
+  watchThumbs();
   return el;
 }
 function updateQueue() {
@@ -404,8 +423,10 @@ async function run() {
       const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
       for (let i = it.ids.length; i < it.shots.length; i++) {
         st.textContent = `사진 ${i + 1}/${it.shots.length} 올리는 중`; st.className = 'st';
-        const blob = it.shots[i].blob;
-        const r = await api({ action: 'upload', visit: it.visit, name: `${stamp}_${i + 1}.jpg`, data: await toDataUrl(blob), thumb: await makeThumb(blob) });
+        const sh = it.shots[i];
+        const r = sh.driveId
+          ? await api({ action: 'copyIn', id: sh.driveId, visit: it.visit, thumb: await driveThumb(sh.driveId) })
+          : await api({ action: 'upload', visit: it.visit, name: `${stamp}_${i + 1}.jpg`, data: await toDataUrl(sh.blob), thumb: await makeThumb(sh.blob) });
         it.ids.push(r.id);
         it.thumbs = it.thumbs || []; it.thumbs.push(r.thumbId || '');
       }
@@ -543,7 +564,7 @@ function openEdit(id) {
 }
 function drawEdit() {
   const k = editing.keep.map((p, i) => `<div><img class="ph" data-tid="${p.tid || p.id}" alt=""><b data-k="${i}">×</b></div>`).join('');
-  const a = editing.add.map((p, i) => `<div class="new"><img src="${p.url}" alt=""><b data-a="${i}">×</b></div>`).join('');
+  const a = editing.add.map((p, i) => `<div class="new"><img ${imgAttr(p)} alt=""><b data-a="${i}">×</b></div>`).join('');
   $('ePhotos').innerHTML = k + a;
   $('ePhotos').querySelectorAll('[data-k]').forEach(x => x.onclick = () => { editing.keep.splice(+x.dataset.k, 1); drawEdit(); });
   $('ePhotos').querySelectorAll('[data-a]').forEach(x => x.onclick = () => { editing.add.splice(+x.dataset.a, 1); drawEdit(); });
@@ -563,8 +584,10 @@ $('eSave').onclick = async () => {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
     for (let i = 0; i < ed.add.length; i++) {
       $('eMsg').textContent = `새 사진 ${i + 1}/${ed.add.length} 올리는 중`;
-      const b = ed.add[i].blob;
-      const r = await api({ action: 'upload', visit: row.visit, name: `${stamp}_e${i + 1}.jpg`, data: await toDataUrl(b), thumb: await makeThumb(b) });
+      const a = ed.add[i];
+      const r = a.driveId
+        ? await api({ action: 'copyIn', id: a.driveId, visit: row.visit, thumb: await driveThumb(a.driveId) })
+        : await api({ action: 'upload', visit: row.visit, name: `${stamp}_e${i + 1}.jpg`, data: await toDataUrl(a.blob), thumb: await makeThumb(a.blob) });
       photos.push(r.id); thumbs.push(r.thumbId || '');
     }
     $('eMsg').textContent = '저장 중';
@@ -576,6 +599,49 @@ $('eSave').onclick = async () => {
   finally { $('eSave').disabled = false; }
 };
 
+
+// ===== 드라이브에서 사진 고르기 =====
+let pick = null; // {stack:[{id,name}], sel:Set, onAdd}
+function openPicker(onAdd) {
+  pick = { stack: [], sel: new Set(), onAdd };
+  $('pickSheet').hidden = false;
+  loadFolder('');
+}
+async function loadFolder(id) {
+  $('pMsg').textContent = '불러오는 중…'; $('pFolders').innerHTML = ''; $('pImages').innerHTML = '';
+  try {
+    const r = await api({ action: 'driveList', folderId: id });
+    if (!pick.stack.length || pick.stack[pick.stack.length - 1].id !== r.id) pick.stack.push({ id: r.id, name: r.name });
+    $('pTitle').textContent = r.name || '내 드라이브';
+    $('pBack').disabled = pick.stack.length < 2;
+    $('pFolders').innerHTML = r.folders.map(f => `<button data-f="${f.id}">📁 ${esc(f.name)}</button>`).join('');
+    $('pImages').innerHTML = r.images.map(f => `<div data-i="${f.id}" class="${pick.sel.has(f.id) ? 'pick' : ''}"><img class="ph" data-tid="${f.id}" alt="${esc(f.name)}"></div>`).join('');
+    $('pFolders').querySelectorAll('[data-f]').forEach(b => b.onclick = () => loadFolder(b.dataset.f));
+    $('pImages').querySelectorAll('[data-i]').forEach(d => d.onclick = () => {
+      const k = d.dataset.i; pick.sel.has(k) ? pick.sel.delete(k) : pick.sel.add(k);
+      d.classList.toggle('pick', pick.sel.has(k)); updatePickBtn();
+    });
+    $('pMsg').textContent = r.folders.length || r.images.length ? '' : '이 폴더에는 사진이 없습니다.';
+    watchThumbs();
+  } catch (e) { $('pMsg').textContent = '불러오지 못했습니다: ' + e.message; }
+}
+function updatePickBtn() { const n = pick.sel.size; $('pAdd').disabled = !n; $('pAdd').textContent = n ? `사진 ${n}장 추가` : '사진 추가'; }
+$('pBack').onclick = () => { if (pick.stack.length < 2) return; pick.stack.pop(); const up = pick.stack.pop(); loadFolder(up.id); };
+$('pClose').onclick = () => { pick = null; $('pickSheet').hidden = true; };
+$('pAdd').onclick = () => {
+  const ids = [...pick.sel]; const cb = pick.onAdd;
+  pick = null; $('pickSheet').hidden = true;
+  ids.forEach(id => cb({ driveId: id, url: thumbCache[id] || '' }));
+};
+// 기록 쪽 미리보기: 드라이브 사진은 받아 둔 썸네일을 줄여서 저장
+async function driveThumb(id) {
+  try {
+    if (!thumbCache[id]) { const r = await api({ action: 'thumbs', ids: [id] }); if (r.thumbs[id]) thumbCache[id] = r.thumbs[id]; }
+    return thumbCache[id] ? await makeThumb(await (await fetch(thumbCache[id])).blob()) : '';
+  } catch (e) { return ''; }
+}
+$('driveBtn').onclick = () => openPicker(p => { shots.push(p); drawShots(); });
+$('eDriveBtn').onclick = () => openPicker(p => { editing.add.push(p); drawEdit(); });
 
 window.addEventListener('beforeunload', e => { if (queue.length) { e.preventDefault(); e.returnValue = ''; } });
 </script>
