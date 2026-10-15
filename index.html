@@ -334,6 +334,7 @@ if (!password) showGate();
 // ===== 카메라 =====
 $('camOn').onclick = startCam;
 async function startCam() {
+  watchTilt(); // 아이폰은 이 버튼을 누를 때 한 번 '동작 및 방향' 허용을 물어봄
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
@@ -362,12 +363,34 @@ function setupZoom() {
     box.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
   });
 }
+// 폰을 실제로 어떻게 들었는지(기울기)로 사진 방향 맞추기 — 화면 회전이 잠겨 있어도 가로로 찍으면 가로 사진
+let tilt = 0; // 0 세로, 90 왼쪽으로 눕힘, 180 거꾸로, 270 오른쪽으로 눕힘
+function onTilt(e) {
+  if (e.beta == null || e.gamma == null) return;
+  const b = e.beta * Math.PI / 180, g = e.gamma * Math.PI / 180;
+  const gx = Math.sin(g) * Math.cos(b), gy = -Math.sin(b); // 기기 기준 중력 방향
+  if (Math.abs(gx) < 0.35 && Math.abs(gy) < 0.35) return;   // 거의 수평(바닥 보고 찍기)이면 직전 방향 유지
+  tilt = Math.abs(gx) > Math.abs(gy) ? (gx < 0 ? 90 : 270) : (gy > 0 ? 180 : 0);
+}
+async function watchTilt() {
+  try { if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) await DeviceOrientationEvent.requestPermission(); } catch (e) {}
+  window.addEventListener('deviceorientation', onTilt);
+}
+function screenAngle() {
+  const a = screen.orientation && typeof screen.orientation.angle === 'number' ? screen.orientation.angle : (window.orientation || 0);
+  return (a + 360) % 360;
+}
 $('shutter').onclick = () => {
   const v = $('video');
   if (!v.videoWidth) return;
+  const vw = v.videoWidth, vh = v.videoHeight;
+  const turn = (tilt - screenAngle() + 360) % 360; // 화면이 같이 돌았으면 0
   const c = document.createElement('canvas');
-  c.width = v.videoWidth; c.height = v.videoHeight;
-  c.getContext('2d').drawImage(v, 0, 0);
+  const side = turn % 180 !== 0;
+  c.width = side ? vh : vw; c.height = side ? vw : vh;
+  const x = c.getContext('2d');
+  x.translate(c.width / 2, c.height / 2); x.rotate(-turn * Math.PI / 180);
+  x.drawImage(v, -vw / 2, -vh / 2);
   const f = $('flash'); f.classList.add('go'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('go')));
   c.toBlob(b => { if (b) addShot(b); }, 'image/jpeg', 0.92);
 };
