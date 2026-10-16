@@ -275,7 +275,7 @@ const qdb = (() => {
   };
 })();
 function persist(it) {
-  return qdb.put({ key: it.key, visit: it.visit, zone: it.zone, note: it.note, ids: it.ids || [], thumbs: it.thumbs || [],
+  return qdb.put({ key: it.key, visit: it.visit, zone: it.zone, note: it.note, ids: it.ids || [], thumbs: it.thumbs || [], done: it.done || null,
     shots: it.shots.map(x => x.driveId ? { driveId: x.driveId } : { blob: x.blob }) });
 }
 
@@ -533,18 +533,30 @@ async function run() {
     const it = queue[0];
     const st = it.el.querySelector('.st');
     try {
-      it.ids = it.ids || [];
+      // 사진은 3장씩 동시에 올림 (원본 그대로). 올린 사진은 기록해 둬서 실패해도 그 다음부터 이어서.
+      if (!it.done) it.done = Object.fromEntries((it.ids || []).map((id, i) => [i, { id, thumbId: (it.thumbs || [])[i] || '' }]));
       const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
-      for (let i = it.ids.length; i < it.shots.length; i++) {
-        st.textContent = `사진 ${i + 1}/${it.shots.length} 올리는 중`; st.className = 'st';
-        const sh = it.shots[i];
-        const r = sh.driveId
-          ? await api({ action: 'copyIn', id: sh.driveId, visit: it.visit, thumb: await driveThumb(sh.driveId) })
-          : await api({ action: 'upload', visit: it.visit, name: `${stamp}_${i + 1}.jpg`, data: await toDataUrl(sh.blob), thumb: await makeThumb(sh.blob) });
-        it.ids.push(r.id);
-        it.thumbs = it.thumbs || []; it.thumbs.push(r.thumbId || '');
-        persist(it); fails = 0; $('netBar').hidden = true;
-      }
+      const total = it.shots.length;
+      const todo = it.shots.map((_, i) => i).filter(i => !it.done[i]);
+      const show = () => { st.textContent = `사진 ${Object.keys(it.done).length}/${total} 올림`; st.className = 'st'; };
+      show();
+      let err = null;
+      const worker = async () => {
+        while (todo.length && !err) {
+          const i = todo.shift(), sh = it.shots[i];
+          try {
+            const r = sh.driveId
+              ? await api({ action: 'copyIn', id: sh.driveId, visit: it.visit, thumb: await driveThumb(sh.driveId) })
+              : await api({ action: 'upload', visit: it.visit, name: `${stamp}_${i + 1}.jpg`, data: await toDataUrl(sh.blob), thumb: await makeThumb(sh.blob) });
+            it.done[i] = { id: r.id, thumbId: r.thumbId || '' };
+            show(); persist(it); fails = 0; $('netBar').hidden = true;
+          } catch (e) { err = e; }
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+      if (err) throw err;
+      it.ids = it.shots.map((_, i) => it.done[i].id);
+      it.thumbs = it.shots.map((_, i) => it.done[i].thumbId);
       st.textContent = '문서에 정리하는 중';
       const r = await api({ action: 'save', visit: it.visit, zone: it.zone, note: it.note, photos: it.ids, thumbs: it.thumbs || [] });
       allRows = null;
